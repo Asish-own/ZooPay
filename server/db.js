@@ -10,12 +10,9 @@ const __dirname = path.dirname(__filename);
 
 const supabaseUrl = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
 
-let isPg = false;
 let pool = null;
-let sqliteDb = null;
 
 if (supabaseUrl && supabaseUrl.trim() !== '') {
-  isPg = true;
   pool = new pg.Pool({
     connectionString: supabaseUrl.trim(),
     ssl: { rejectUnauthorized: false },
@@ -23,20 +20,11 @@ if (supabaseUrl && supabaseUrl.trim() !== '') {
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000
   });
-} else if (process.env.VERCEL) {
-  isPg = true;
-  console.error('CRITICAL WARNING: SUPABASE_DB_URL environment variable is not defined in Vercel settings!');
 } else {
-  console.log('Using local SQLite Database (zoopay.db)...');
-  const Database = (await import('better-sqlite3')).default;
-  const dbPath = path.join(__dirname, 'zoopay.db');
-  sqliteDb = new Database(dbPath);
-  sqliteDb.pragma('foreign_keys = ON');
-  sqliteDb.pragma('journal_mode = WAL');
+  console.warn('SUPABASE_DB_URL is not set. Database requests will require SUPABASE_DB_URL.');
 }
 
 function convertSql(sql) {
-  if (!isPg) return sql;
   let index = 1;
   let pgSql = sql.replace(/\?/g, () => `$${index++}`);
 
@@ -52,24 +40,24 @@ function convertSql(sql) {
 }
 
 const db = {
-  isPg,
+  isPg: true,
   prepare(sql) {
-    if (!isPg) {
-      return sqliteDb.prepare(sql);
-    }
     const pgSql = convertSql(sql);
     return {
       async get(...params) {
+        if (!pool) throw new Error('Database pool not initialized. SUPABASE_DB_URL is missing in environment variables.');
         const flat = params.length === 1 && Array.isArray(params[0]) ? params[0] : params;
         const res = await pool.query(pgSql, flat);
         return res.rows[0];
       },
       async all(...params) {
+        if (!pool) throw new Error('Database pool not initialized. SUPABASE_DB_URL is missing in environment variables.');
         const flat = params.length === 1 && Array.isArray(params[0]) ? params[0] : params;
         const res = await pool.query(pgSql, flat);
         return res.rows;
       },
       async run(...params) {
+        if (!pool) throw new Error('Database pool not initialized. SUPABASE_DB_URL is missing in environment variables.');
         const flat = params.length === 1 && Array.isArray(params[0]) ? params[0] : params;
         const res = await pool.query(pgSql, flat);
         const firstRow = res.rows && res.rows[0] ? res.rows[0] : null;
@@ -82,10 +70,8 @@ const db = {
     };
   },
   transaction(fn) {
-    if (!isPg) {
-      return sqliteDb.transaction(fn);
-    }
     return async (...args) => {
+      if (!pool) throw new Error('Database pool not initialized. SUPABASE_DB_URL is missing in environment variables.');
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
@@ -101,34 +87,12 @@ const db = {
     };
   },
   pragma(stmt) {
-    if (!isPg && sqliteDb) {
-      sqliteDb.pragma(stmt);
-    }
+    // No-op for Postgres
   }
 };
 
 export async function initDatabase() {
-  if (!isPg && sqliteDb) {
-    sqliteDb.exec(`
-      CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        mobile TEXT UNIQUE NOT NULL,
-        username TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        referral_code TEXT UNIQUE NOT NULL,
-        referred_by_id INTEGER,
-        bank_holder_name TEXT,
-        bank_account_number TEXT,
-        bank_ifsc TEXT,
-        bank_name TEXT,
-        bank_upi_id TEXT,
-        status TEXT DEFAULT 'ACTIVE',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-  }
-  console.log('Database initialized successfully.');
+  console.log('PostgreSQL database ready.');
 }
 
 export default db;
