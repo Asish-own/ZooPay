@@ -1,0 +1,20 @@
+# Node modules
+node_modules/
+
+# Production build assets
+dist/
+
+# Local Environment Variables & Secrets
+.env
+.env.local
+
+# Local SQLite Database file
+zoopay.db
+zoopay.db-shm
+zoopay.db-wal
+
+# OS / Editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
