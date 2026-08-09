@@ -1,11 +1,11 @@
 import db from '../db.js';
 
-export function getAvailablePlans(req, res) {
+export async function getAvailablePlans(req, res) {
   try {
     const userId = req.user.id;
 
     // Get all system active plans
-    const allPlans = db.prepare(`
+    const allPlans = await db.prepare(`
       SELECT id, amount, bonus_percentage, status, created_at
       FROM plans
       WHERE status = 'AVAILABLE'
@@ -13,7 +13,7 @@ export function getAvailablePlans(req, res) {
     `).all();
 
     // Get active transactions for ALL users (Single-accept rule across platform)
-    const allActiveTxns = db.prepare(`
+    const allActiveTxns = await db.prepare(`
       SELECT plan_id, user_id, id as transaction_id, status, utr, created_at
       FROM buy_transactions
       WHERE status IN ('PAYMENT_PENDING', 'UTR_SUBMITTED', 'UNDER_VERIFICATION')
@@ -58,7 +58,7 @@ export function getAvailablePlans(req, res) {
   }
 }
 
-export function initiateBuy(req, res) {
+export async function initiateBuy(req, res) {
   try {
     const userId = req.user.id;
     const { planId } = req.body;
@@ -67,13 +67,13 @@ export function initiateBuy(req, res) {
       return res.status(400).json({ error: 'Please select a plan to purchase.' });
     }
 
-    const plan = db.prepare('SELECT * FROM plans WHERE id = ? AND status = \'AVAILABLE\'').get(planId);
+    const plan = await db.prepare('SELECT * FROM plans WHERE id = ? AND status = \'AVAILABLE\'').get(planId);
     if (!plan) {
       return res.status(404).json({ error: 'This plan is no longer available.' });
     }
 
     // Check if ANY user has already accepted or has an active transaction for this plan
-    const anyActiveTx = db.prepare(`
+    const anyActiveTx = await db.prepare(`
       SELECT id, user_id, status FROM buy_transactions
       WHERE plan_id = ? AND status IN ('PAYMENT_PENDING', 'UTR_SUBMITTED', 'UNDER_VERIFICATION')
     `).get(planId);
@@ -92,15 +92,15 @@ export function initiateBuy(req, res) {
     }
 
     // Check global buy bonus setting if set, else fallback to plan bonus
-    const buyBonusSetting = db.prepare(`SELECT value FROM system_settings WHERE key = 'buy_bonus_percent'`).get();
+    const buyBonusSetting = await db.prepare(`SELECT value FROM system_settings WHERE key = 'buy_bonus_percent'`).get();
     const bonusPct = buyBonusSetting && buyBonusSetting.value ? parseFloat(buyBonusSetting.value) : plan.bonus_percentage;
 
     const bonusAmount = (plan.amount * bonusPct) / 100;
     const totalAmount = plan.amount + bonusAmount;
 
     // --- ROUND-ROBIN PAYMENT ACCOUNT SELECTION ---
-    const selectAccountTx = db.transaction(() => {
-      const activeAccounts = db.prepare(`
+    const selectAccountTx = db.transaction(async () => {
+      const activeAccounts = await db.prepare(`
         SELECT * FROM payment_accounts
         WHERE status = 'ACTIVE'
         ORDER BY order_index ASC, id ASC
@@ -115,7 +115,7 @@ export function initiateBuy(req, res) {
 
       // 2. If all active accounts reached their display limits, reset all active counters to 0 and pick first
       if (!selectedAccount) {
-        db.prepare(`
+        await db.prepare(`
           UPDATE payment_accounts
           SET current_display_count = 0, updated_at = CURRENT_TIMESTAMP
           WHERE status = 'ACTIVE'
@@ -126,7 +126,7 @@ export function initiateBuy(req, res) {
       }
 
       // 3. Increment usage count for selected account
-      db.prepare(`
+      await db.prepare(`
         UPDATE payment_accounts
         SET current_display_count = current_display_count + 1, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
@@ -145,7 +145,7 @@ export function initiateBuy(req, res) {
     const transactionId = `BUY-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
     // Create purchase record
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO buy_transactions (
         id, user_id, plan_id, plan_amount, bonus_percentage, bonus_amount, total_amount, payment_account_id, status
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING')
@@ -161,7 +161,7 @@ export function initiateBuy(req, res) {
     );
 
     // Notify user
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO notifications (user_id, title, message, type)
       VALUES (?, ?, ?, 'INFO')
     `).run(
@@ -195,7 +195,7 @@ export function initiateBuy(req, res) {
   }
 }
 
-export function submitUTR(req, res) {
+export async function submitUTR(req, res) {
   try {
     const userId = req.user.id;
     const { transactionId, utr } = req.body;
@@ -209,7 +209,7 @@ export function submitUTR(req, res) {
       return res.status(400).json({ error: 'Please enter a valid UTR / Transaction reference (minimum 6 digits).' });
     }
 
-    const tx = db.prepare('SELECT * FROM buy_transactions WHERE id = ? AND user_id = ?').get(transactionId, userId);
+    const tx = await db.prepare('SELECT * FROM buy_transactions WHERE id = ? AND user_id = ?').get(transactionId, userId);
     if (!tx) {
       return res.status(404).json({ error: 'Transaction not found.' });
     }
@@ -223,7 +223,7 @@ export function submitUTR(req, res) {
     }
 
     // Check duplicate UTR across system
-    const duplicateUTR = db.prepare(`
+    const duplicateUTR = await db.prepare(`
       SELECT id FROM buy_transactions
       WHERE utr = ? AND id != ? AND status != 'CANCELLED'
     `).get(cleanUTR, transactionId);
@@ -233,14 +233,14 @@ export function submitUTR(req, res) {
     }
 
     // Update status to UTR_SUBMITTED / UNDER_VERIFICATION
-    db.prepare(`
+    await db.prepare(`
       UPDATE buy_transactions
       SET utr = ?, status = 'UTR_SUBMITTED', updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(cleanUTR, transactionId);
 
     // Notify user
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO notifications (user_id, title, message, type)
       VALUES (?, ?, ?, 'INFO')
     `).run(
@@ -261,7 +261,7 @@ export function submitUTR(req, res) {
   }
 }
 
-export function cancelBuy(req, res) {
+export async function cancelBuy(req, res) {
   try {
     const userId = req.user.id;
     const { transactionId } = req.body;
@@ -270,7 +270,7 @@ export function cancelBuy(req, res) {
       return res.status(400).json({ error: 'Transaction ID is required.' });
     }
 
-    const tx = db.prepare('SELECT * FROM buy_transactions WHERE id = ? AND user_id = ?').get(transactionId, userId);
+    const tx = await db.prepare('SELECT * FROM buy_transactions WHERE id = ? AND user_id = ?').get(transactionId, userId);
     if (!tx) {
       return res.status(404).json({ error: 'Transaction not found.' });
     }
@@ -280,13 +280,13 @@ export function cancelBuy(req, res) {
     }
 
     // Cancel transaction, which unlocks the plan to AVAILABLE status for the user
-    db.prepare(`
+    await db.prepare(`
       UPDATE buy_transactions
       SET status = 'CANCELLED', updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(transactionId);
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO notifications (user_id, title, message, type)
       VALUES (?, ?, ?, 'WARNING')
     `).run(userId, 'Buy Order Cancelled', `Transaction ${transactionId} has been cancelled. The plan is now available for purchase again.`);

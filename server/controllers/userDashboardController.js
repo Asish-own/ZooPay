@@ -1,53 +1,53 @@
 import db from '../db.js';
 
-export function getDashboardSummary(req, res) {
+export async function getDashboardSummary(req, res) {
   try {
     const userId = req.user.id;
 
     // Available Balance from wallet_ledger
-    const balanceRow = db.prepare(`
+    const balanceRow = await db.prepare(`
       SELECT COALESCE(SUM(amount), 0) as balance
       FROM wallet_ledger
       WHERE user_id = ?
     `).get(userId);
 
     // Total Buy Amount
-    const buyRow = db.prepare(`
+    const buyRow = await db.prepare(`
       SELECT COALESCE(SUM(amount), 0) as total
       FROM wallet_ledger
       WHERE user_id = ? AND type = 'BUY_CREDIT'
     `).get(userId);
 
     // Total Bonus Received (Buy bonus + Signup bonus + Admin credit bonus)
-    const bonusRow = db.prepare(`
+    const bonusRow = await db.prepare(`
       SELECT COALESCE(SUM(amount), 0) as total
       FROM wallet_ledger
       WHERE user_id = ? AND type IN ('BUY_BONUS', 'SIGNUP_BONUS')
     `).get(userId);
 
     // Total Referral Reward
-    const refRow = db.prepare(`
+    const refRow = await db.prepare(`
       SELECT COALESCE(SUM(amount), 0) as total
       FROM wallet_ledger
       WHERE user_id = ? AND type = 'REFERRAL_REWARD'
     `).get(userId);
 
     // Total Sell / Withdrawal Paid
-    const sellRow = db.prepare(`
+    const sellRow = await db.prepare(`
       SELECT COALESCE(ABS(SUM(amount)), 0) as total
       FROM wallet_ledger
       WHERE user_id = ? AND type = 'WITHDRAWAL_DEBIT'
     `).get(userId);
 
     // Pending Withdrawal Amount
-    const pendingWithdrawRow = db.prepare(`
+    const pendingWithdrawRow = await db.prepare(`
       SELECT COUNT(*) as pending_count, COALESCE(SUM(amount_paid), 0) as pending_sum
       FROM withdrawal_requests
       WHERE user_id = ? AND status IN ('REQUESTED', 'PROCESSING', 'APPROVED')
     `).get(userId);
 
     // Recent 5 notifications
-    const notifications = db.prepare(`
+    const notifications = await db.prepare(`
       SELECT id, title, message, type, is_read as isRead, created_at as createdAt
       FROM notifications
       WHERE user_id = ? OR user_id IS NULL
@@ -72,12 +72,12 @@ export function getDashboardSummary(req, res) {
   }
 }
 
-export function getUserHistory(req, res) {
+export async function getUserHistory(req, res) {
   try {
     const userId = req.user.id;
 
     // 1. Buy History
-    const buyHistory = db.prepare(`
+    const buyHistory = await db.prepare(`
       SELECT
         b.id,
         b.plan_amount as planAmount,
@@ -96,7 +96,7 @@ export function getUserHistory(req, res) {
     `).all(userId);
 
     // 2. Sell / Withdrawal History
-    const sellHistory = db.prepare(`
+    const sellHistory = await db.prepare(`
       SELECT
         w.id,
         w.upi_string as upiString,
@@ -112,7 +112,7 @@ export function getUserHistory(req, res) {
     `).all(userId);
 
     // 3. Token / Ledger History
-    const tokenHistory = db.prepare(`
+    const tokenHistory = await db.prepare(`
       SELECT
         id,
         amount,
@@ -126,7 +126,7 @@ export function getUserHistory(req, res) {
     `).all(userId);
 
     // 4. Reward History (Buy Bonus entries)
-    const rewardHistory = db.prepare(`
+    const rewardHistory = await db.prepare(`
       SELECT
         b.id as transactionId,
         b.plan_amount as planAmount,
@@ -139,7 +139,7 @@ export function getUserHistory(req, res) {
     `).all(userId);
 
     // 5. Referral History
-    const referralHistory = db.prepare(`
+    const referralHistory = await db.prepare(`
       SELECT
         r.id,
         u.username as referredUsername,
@@ -167,24 +167,24 @@ export function getUserHistory(req, res) {
   }
 }
 
-export function getReferralInfo(req, res) {
+export async function getReferralInfo(req, res) {
   try {
     const user = req.user;
 
-    const referredUsers = db.prepare(`
+    const referredUsers = await db.prepare(`
       SELECT id, username, mobile, status, created_at as createdAt
       FROM users
       WHERE referred_by_id = ?
       ORDER BY id DESC
     `).all(user.id);
 
-    const rewardsSum = db.prepare(`
+    const rewardsSum = await db.prepare(`
       SELECT COALESCE(SUM(reward_amount), 0) as totalReward
       FROM referral_rewards
       WHERE referrer_id = ?
     `).get(user.id);
 
-    const refBonusSetting = db.prepare(`SELECT value FROM system_settings WHERE key = 'referral_bonus_percent'`).get();
+    const refBonusSetting = await db.prepare(`SELECT value FROM system_settings WHERE key = 'referral_bonus_percent'`).get();
     const currentRefBonusPct = refBonusSetting ? parseFloat(refBonusSetting.value) : 0.05;
 
     return res.json({
@@ -200,10 +200,10 @@ export function getReferralInfo(req, res) {
   }
 }
 
-export function getNotifications(req, res) {
+export async function getNotifications(req, res) {
   try {
     const userId = req.user.id;
-    const notifications = db.prepare(`
+    const notifications = await db.prepare(`
       SELECT id, title, message, type, is_read as isRead, created_at as createdAt
       FROM notifications
       WHERE user_id = ? OR user_id IS NULL
@@ -217,12 +217,12 @@ export function getNotifications(req, res) {
   }
 }
 
-export function markNotificationRead(req, res) {
+export async function markNotificationRead(req, res) {
   try {
     const userId = req.user.id;
     const { id } = req.params;
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE notifications
       SET is_read = 1
       WHERE id = ? AND (user_id = ? OR user_id IS NULL)
@@ -235,9 +235,9 @@ export function markNotificationRead(req, res) {
   }
 }
 
-export function getContactInfo(req, res) {
+export async function getContactInfo(req, res) {
   try {
-    const telegramSetting = db.prepare(`SELECT value FROM system_settings WHERE key = 'telegram_channel_link'`).get();
+    const telegramSetting = await db.prepare(`SELECT value FROM system_settings WHERE key = 'telegram_channel_link'`).get();
     const telegramLink = telegramSetting ? telegramSetting.value : 'https://t.me/zoopay_official';
 
     return res.json({

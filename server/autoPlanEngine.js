@@ -2,7 +2,7 @@ import db from './db.js';
 
 let intervalTimer = null;
 
-export function startAutoPlanEngine() {
+export async function startAutoPlanEngine() {
   if (intervalTimer) {
     clearInterval(intervalTimer);
   }
@@ -21,7 +21,7 @@ export function startAutoPlanEngine() {
 function generateRandomPlan() {
   try {
     // 1. Fetch system settings
-    const settingsRows = db.prepare(`SELECT key, value FROM system_settings`).all();
+    const settingsRows = await db.prepare(`SELECT key, value FROM system_settings`).all();
     const settings = {};
     settingsRows.forEach(s => { settings[s.key] = s.value; });
 
@@ -46,12 +46,12 @@ function generateRandomPlan() {
     const randomAmount = randomStep * step;
 
     // Check if an AVAILABLE plan with this exact amount already exists
-    const existingPlan = db.prepare(`
+    const existingPlan = await db.prepare(`
       SELECT id FROM plans WHERE amount = ? AND status = 'AVAILABLE'
     `).get(randomAmount);
 
     if (!existingPlan) {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO plans (amount, bonus_percentage, status)
         VALUES (?, ?, 'AVAILABLE')
       `).run(randomAmount, defaultBonus);
@@ -60,7 +60,7 @@ function generateRandomPlan() {
     }
 
     // Keep pool clean by deleting old unreferenced AVAILABLE plans
-    db.prepare(`
+    await db.prepare(`
       DELETE FROM plans
       WHERE status = 'AVAILABLE'
         AND id NOT IN (SELECT id FROM plans WHERE status = 'AVAILABLE' ORDER BY created_at DESC LIMIT 25)

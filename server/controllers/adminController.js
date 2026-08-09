@@ -3,34 +3,37 @@ import db from '../db.js';
 import { logAudit } from '../middleware/audit.js';
 
 // --- ADMIN DASHBOARD STATS ---
-export function getAdminDashboardStats(req, res) {
+export async function getAdminDashboardStats(req, res) {
   try {
-    const totalUsers = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
+    const userRow = await db.prepare('SELECT COUNT(*) as count FROM users').get();
+    const totalUsers = userRow ? parseInt(userRow.count) : 0;
 
-    const totalDepositedRow = db.prepare(`
+    const totalDepositedRow = await db.prepare(`
       SELECT COALESCE(SUM(total_amount), 0) as total
       FROM buy_transactions
       WHERE status = 'APPROVED'
     `).get();
 
-    const totalWithdrawalsPaidRow = db.prepare(`
+    const totalWithdrawalsPaidRow = await db.prepare(`
       SELECT COALESCE(SUM(amount_paid), 0) as total
       FROM withdrawal_requests
       WHERE status = 'PAID'
     `).get();
 
-    const pendingBuyCount = db.prepare(`
+    const buyCountRow = await db.prepare(`
       SELECT COUNT(*) as count FROM buy_transactions
       WHERE status IN ('UTR_SUBMITTED', 'UNDER_VERIFICATION')
-    `).get().count;
+    `).get();
+    const pendingBuyCount = buyCountRow ? parseInt(buyCountRow.count) : 0;
 
-    const pendingWithdrawCount = db.prepare(`
+    const withdrawCountRow = await db.prepare(`
       SELECT COUNT(*) as count FROM withdrawal_requests
       WHERE status IN ('REQUESTED', 'PROCESSING')
-    `).get().count;
+    `).get();
+    const pendingWithdrawCount = withdrawCountRow ? parseInt(withdrawCountRow.count) : 0;
 
-    const totalDeposited = totalDepositedRow.total;
-    const totalWithdrawalsPaid = totalWithdrawalsPaidRow.total;
+    const totalDeposited = parseFloat(totalDepositedRow?.total || 0);
+    const totalWithdrawalsPaid = parseFloat(totalWithdrawalsPaidRow?.total || 0);
     const amountAvailableLeft = totalDeposited - totalWithdrawalsPaid;
 
     return res.json({
@@ -50,7 +53,7 @@ export function getAdminDashboardStats(req, res) {
 }
 
 // --- USER MANAGEMENT ---
-export function getAllUsers(req, res) {
+export async function getAllUsers(req, res) {
   try {
     const { search, status } = req.query;
 
@@ -78,7 +81,7 @@ export function getAllUsers(req, res) {
 
     query += ` ORDER BY u.id DESC`;
 
-    const users = db.prepare(query).all(...params);
+    const users = await db.prepare(query).all(...params);
     return res.json({ users });
   } catch (err) {
     console.error('Get users error:', err);
@@ -86,7 +89,7 @@ export function getAllUsers(req, res) {
   }
 }
 
-export function toggleUserStatus(req, res) {
+export async function toggleUserStatus(req, res) {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -95,12 +98,12 @@ export function toggleUserStatus(req, res) {
       return res.status(400).json({ error: 'Invalid user status.' });
     }
 
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(id);
     if (!user) {
       return res.status(404).json({ error: 'User not found.' });
     }
 
-    db.prepare('UPDATE users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(status, id);
+    await db.prepare('UPDATE users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(status, id);
 
     logAudit(req.admin.id, 'TOGGLE_USER_STATUS', `User ID: ${id} (${user.username})`, { status: user.status }, { status }, req);
 
@@ -120,13 +123,13 @@ export async function resetUserPassword(req, res) {
       return res.status(400).json({ error: 'New password must be at least 6 characters long.' });
     }
 
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(id);
     if (!user) {
       return res.status(404).json({ error: 'User not found.' });
     }
 
     const newHash = await bcrypt.hash(newPassword, 10);
-    db.prepare('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newHash, id);
+    await db.prepare('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newHash, id);
 
     logAudit(req.admin.id, 'RESET_USER_PASSWORD', `User ID: ${id} (${user.username})`, null, null, req);
 
@@ -138,9 +141,9 @@ export async function resetUserPassword(req, res) {
 }
 
 // --- BUY PLAN MANAGEMENT (CRUD) ---
-export function getAdminPlans(req, res) {
+export async function getAdminPlans(req, res) {
   try {
-    const plans = db.prepare(`
+    const plans = await db.prepare(`
       SELECT
         p.id, p.amount, p.bonus_percentage as bonusPercentage, p.status, p.created_at as createdAt,
         (
@@ -158,7 +161,7 @@ export function getAdminPlans(req, res) {
   }
 }
 
-export function createPlan(req, res) {
+export async function createPlan(req, res) {
   try {
     const { amount, bonusPercentage } = req.body;
 
@@ -173,7 +176,7 @@ export function createPlan(req, res) {
       return res.status(400).json({ error: 'Please enter a valid bonus percentage (0 or higher).' });
     }
 
-    const result = db.prepare(`
+    const result = await db.prepare(`
       INSERT INTO plans (amount, bonus_percentage, status)
       VALUES (?, ?, 'AVAILABLE')
     `).run(numAmount, numBonus);
@@ -195,12 +198,12 @@ export function createPlan(req, res) {
   }
 }
 
-export function updatePlan(req, res) {
+export async function updatePlan(req, res) {
   try {
     const { id } = req.params;
     const { amount, bonusPercentage, status } = req.body;
 
-    const existing = db.prepare('SELECT * FROM plans WHERE id = ?').get(id);
+    const existing = await db.prepare('SELECT * FROM plans WHERE id = ?').get(id);
     if (!existing) {
       return res.status(404).json({ error: 'Plan not found.' });
     }
@@ -209,7 +212,7 @@ export function updatePlan(req, res) {
     const numBonus = bonusPercentage !== undefined ? parseFloat(bonusPercentage) : existing.bonus_percentage;
     const newStatus = status || existing.status;
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE plans
       SET amount = ?, bonus_percentage = ?, status = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
@@ -224,11 +227,11 @@ export function updatePlan(req, res) {
   }
 }
 
-export function deletePlan(req, res) {
+export async function deletePlan(req, res) {
   try {
     const { id } = req.params;
 
-    const activeTx = db.prepare(`
+    const activeTx = await db.prepare(`
       SELECT COUNT(*) as count FROM buy_transactions
       WHERE plan_id = ? AND status IN ('PAYMENT_PENDING', 'UTR_SUBMITTED', 'UNDER_VERIFICATION')
     `).get(id).count;
@@ -237,7 +240,7 @@ export function deletePlan(req, res) {
       return res.status(400).json({ error: 'Cannot delete plan while it has active transactions in progress.' });
     }
 
-    db.prepare('DELETE FROM plans WHERE id = ?').run(id);
+    await db.prepare('DELETE FROM plans WHERE id = ?').run(id);
 
     logAudit(req.admin.id, 'DELETE_BUY_PLAN', `Plan ID: ${id}`, null, null, req);
 
@@ -249,9 +252,9 @@ export function deletePlan(req, res) {
 }
 
 // --- PAYMENT ACCOUNTS MANAGEMENT (ROUND-ROBIN CRUD) ---
-export function getAdminAccounts(req, res) {
+export async function getAdminAccounts(req, res) {
   try {
-    const accounts = db.prepare(`
+    const accounts = await db.prepare(`
       SELECT
         id, account_holder as accountHolder, bank_name as bankName,
         account_number as accountNumber, ifsc, upi_id as upiId,
@@ -268,7 +271,7 @@ export function getAdminAccounts(req, res) {
   }
 }
 
-export function createAccount(req, res) {
+export async function createAccount(req, res) {
   try {
     const { accountHolder, bankName, accountNumber, ifsc, upiId, displayLimit } = req.body;
 
@@ -278,9 +281,10 @@ export function createAccount(req, res) {
 
     const limit = parseInt(displayLimit) || 5;
 
-    const maxOrder = db.prepare('SELECT MAX(order_index) as maxOrder FROM payment_accounts').get().maxOrder || 0;
+    const maxOrderRow = await db.prepare('SELECT MAX(order_index) as maxorder FROM payment_accounts').get();
+    const maxOrder = maxOrderRow && maxOrderRow.maxorder ? parseInt(maxOrderRow.maxorder) : 0;
 
-    const result = db.prepare(`
+    const result = await db.prepare(`
       INSERT INTO payment_accounts (
         account_holder, bank_name, account_number, ifsc, upi_id, display_limit, current_display_count, order_index, status
       ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'ACTIVE')
@@ -308,17 +312,17 @@ export function createAccount(req, res) {
   }
 }
 
-export function updateAccount(req, res) {
+export async function updateAccount(req, res) {
   try {
     const { id } = req.params;
     const { accountHolder, bankName, accountNumber, ifsc, upiId, displayLimit, status } = req.body;
 
-    const existing = db.prepare('SELECT * FROM payment_accounts WHERE id = ?').get(id);
+    const existing = await db.prepare('SELECT * FROM payment_accounts WHERE id = ?').get(id);
     if (!existing) {
       return res.status(404).json({ error: 'Bank account record not found.' });
     }
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE payment_accounts
       SET account_holder = ?, bank_name = ?, account_number = ?, ifsc = ?, upi_id = ?, display_limit = ?, status = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
@@ -342,10 +346,10 @@ export function updateAccount(req, res) {
   }
 }
 
-export function resetAccountUsageCount(req, res) {
+export async function resetAccountUsageCount(req, res) {
   try {
     const { id } = req.params;
-    db.prepare('UPDATE payment_accounts SET current_display_count = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(id);
+    await db.prepare('UPDATE payment_accounts SET current_display_count = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(id);
 
     logAudit(req.admin.id, 'RESET_ACCOUNT_COUNTER', `Account ID: ${id}`, null, { current_display_count: 0 }, req);
 
@@ -356,23 +360,23 @@ export function resetAccountUsageCount(req, res) {
   }
 }
 
-export function deleteAccount(req, res) {
+export async function deleteAccount(req, res) {
   try {
     const { id } = req.params;
 
-    const account = db.prepare('SELECT * FROM payment_accounts WHERE id = ?').get(id);
+    const account = await db.prepare('SELECT * FROM payment_accounts WHERE id = ?').get(id);
     if (!account) {
       return res.status(404).json({ error: 'Payment account not found.' });
     }
 
     // Check if there are any buy transactions associated with this account
-    const txCount = db.prepare(`
+    const txCount = await db.prepare(`
       SELECT COUNT(*) as count FROM buy_transactions WHERE payment_account_id = ?
     `).get(id).count;
 
     if (txCount > 0) {
       // Deactivate account so it is immediately hidden from Buy page and Round-Robin pool
-      db.prepare(`
+      await db.prepare(`
         UPDATE payment_accounts
         SET status = 'INACTIVE', updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
@@ -386,7 +390,7 @@ export function deleteAccount(req, res) {
     }
 
     // Clean delete if no transactions reference it
-    db.prepare('DELETE FROM payment_accounts WHERE id = ?').run(id);
+    await db.prepare('DELETE FROM payment_accounts WHERE id = ?').run(id);
 
     logAudit(req.admin.id, 'DELETE_BANK_ACCOUNT', `Account ID: ${id}`, account, null, req);
 
@@ -398,9 +402,9 @@ export function deleteAccount(req, res) {
 }
 
 // --- BUY VERIFICATION SECTION ---
-export function getPendingBuyVerifications(req, res) {
+export async function getPendingBuyVerifications(req, res) {
   try {
-    const pendingTxns = db.prepare(`
+    const pendingTxns = await db.prepare(`
       SELECT
         b.id, b.user_id as userId, b.plan_amount as planAmount,
         b.bonus_percentage as bonusPercentage, b.bonus_amount as bonusAmount,
@@ -420,12 +424,12 @@ export function getPendingBuyVerifications(req, res) {
   }
 }
 
-export function approveBuyVerification(req, res) {
+export async function approveBuyVerification(req, res) {
   try {
     const { id } = req.params;
     const { adminNote } = req.body;
 
-    const tx = db.prepare('SELECT * FROM buy_transactions WHERE id = ?').get(id);
+    const tx = await db.prepare('SELECT * FROM buy_transactions WHERE id = ?').get(id);
     if (!tx) {
       return res.status(404).json({ error: 'Transaction not found.' });
     }
@@ -435,49 +439,49 @@ export function approveBuyVerification(req, res) {
       return res.json({ message: 'Transaction was already approved.', transactionId: id, status: 'APPROVED' });
     }
 
-    const buyer = db.prepare('SELECT id, username, referred_by_id FROM users WHERE id = ?').get(tx.user_id);
+    const buyer = await db.prepare('SELECT id, username, referred_by_id FROM users WHERE id = ?').get(tx.user_id);
 
-    const approveTransaction = db.transaction(() => {
+    const approveTransaction = db.transaction(async () => {
       // 1. Update buy_transactions status
-      db.prepare(`
+      await db.prepare(`
         UPDATE buy_transactions
         SET status = 'APPROVED', admin_note = ?, updated_at = CURRENT_TIMESTAMP, verified_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(adminNote || 'Payment Verified & Approved by Admin', id);
 
       // 2. Credit buyer in wallet_ledger: BUY_CREDIT and BUY_BONUS
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO wallet_ledger (user_id, amount, type, reference_type, reference_id, description)
         VALUES (?, ?, 'BUY_CREDIT', 'BUY_TRANSACTION', ?, ?)
       `).run(tx.user_id, tx.plan_amount, id, `Deposit Plan Purchase (Tx: ${id})`);
 
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO wallet_ledger (user_id, amount, type, reference_type, reference_id, description)
         VALUES (?, ?, 'BUY_BONUS', 'BUY_TRANSACTION', ?, ?)
       `).run(tx.user_id, tx.bonus_amount, id, `Buy Plan Bonus (${tx.bonus_percentage}%)`);
 
       // 3. Referral reward processing if buyer was referred
       if (buyer && buyer.referred_by_id) {
-        const refBonusSetting = db.prepare(`SELECT value FROM system_settings WHERE key = 'referral_bonus_percent'`).get();
+        const refBonusSetting = await db.prepare(`SELECT value FROM system_settings WHERE key = 'referral_bonus_percent'`).get();
         const refPct = refBonusSetting ? parseFloat(refBonusSetting.value) : 0.05;
 
         const refRewardAmount = (tx.plan_amount * refPct) / 100;
 
         if (refRewardAmount > 0) {
           // Insert into referral_rewards
-          db.prepare(`
+          await db.prepare(`
             INSERT INTO referral_rewards (referrer_id, referred_user_id, buy_transaction_id, transaction_amount, reward_percentage, reward_amount)
             VALUES (?, ?, ?, ?, ?, ?)
           `).run(buyer.referred_by_id, buyer.id, id, tx.plan_amount, refPct, refRewardAmount);
 
           // Credit referrer ledger
-          db.prepare(`
+          await db.prepare(`
             INSERT INTO wallet_ledger (user_id, amount, type, reference_type, reference_id, description)
             VALUES (?, ?, 'REFERRAL_REWARD', 'REFERRAL', ?, ?)
           `).run(buyer.referred_by_id, refRewardAmount, id, `Referral Reward (${refPct}%) for purchase by ${buyer.username}`);
 
           // Notify referrer
-          db.prepare(`
+          await db.prepare(`
             INSERT INTO notifications (user_id, title, message, type)
             VALUES (?, ?, ?, 'SUCCESS')
           `).run(buyer.referred_by_id, 'Referral Reward Credited!', `You earned ₹${refRewardAmount.toFixed(2)} referral reward from ${buyer.username}'s purchase!`);
@@ -485,7 +489,7 @@ export function approveBuyVerification(req, res) {
       }
 
       // 4. Notify buyer
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO notifications (user_id, title, message, type)
         VALUES (?, ?, ?, 'SUCCESS')
       `).run(
@@ -506,12 +510,12 @@ export function approveBuyVerification(req, res) {
   }
 }
 
-export function rejectBuyVerification(req, res) {
+export async function rejectBuyVerification(req, res) {
   try {
     const { id } = req.params;
     const { adminNote } = req.body;
 
-    const tx = db.prepare('SELECT * FROM buy_transactions WHERE id = ?').get(id);
+    const tx = await db.prepare('SELECT * FROM buy_transactions WHERE id = ?').get(id);
     if (!tx) {
       return res.status(404).json({ error: 'Transaction not found.' });
     }
@@ -521,13 +525,13 @@ export function rejectBuyVerification(req, res) {
     }
 
     // Rejection unlocks the plan back to AVAILABLE
-    db.prepare(`
+    await db.prepare(`
       UPDATE buy_transactions
       SET status = 'REJECTED', admin_note = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(adminNote || 'Payment Rejected by Admin', id);
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO notifications (user_id, title, message, type)
       VALUES (?, ?, ?, 'ERROR')
     `).run(tx.user_id, 'Payment Rejected', `Your payment verification for transaction ${id} was rejected. Note: ${adminNote || 'Invalid UTR or verification failed.'}`);
@@ -542,9 +546,9 @@ export function rejectBuyVerification(req, res) {
 }
 
 // --- WITHDRAWAL MANAGEMENT ---
-export function getAdminWithdrawals(req, res) {
+export async function getAdminWithdrawals(req, res) {
   try {
-    const requests = db.prepare(`
+    const requests = await db.prepare(`
       SELECT
         w.id, w.user_id as userId, w.user_upi_id as userUpiId, w.upi_string as upiString,
         w.status, w.amount_paid as amountPaid, w.reference_id as referenceId,
@@ -563,12 +567,12 @@ export function getAdminWithdrawals(req, res) {
   }
 }
 
-export function processWithdrawal(req, res) {
+export async function processWithdrawal(req, res) {
   try {
     const { id } = req.params;
     const { amountToPay, referenceId, adminNote, action } = req.body;
 
-    const request = db.prepare('SELECT * FROM withdrawal_requests WHERE id = ?').get(id);
+    const request = await db.prepare('SELECT * FROM withdrawal_requests WHERE id = ?').get(id);
     if (!request) {
       return res.status(404).json({ error: 'Withdrawal request not found.' });
     }
@@ -578,13 +582,13 @@ export function processWithdrawal(req, res) {
     }
 
     if (action === 'REJECT') {
-      db.prepare(`
+      await db.prepare(`
         UPDATE withdrawal_requests
         SET status = 'REJECTED', admin_note = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(adminNote || 'Withdrawal rejected by Admin', id);
 
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO notifications (user_id, title, message, type)
         VALUES (?, ?, ?, 'ERROR')
       `).run(request.user_id, 'Withdrawal Rejected', `Your withdrawal request ${id} was rejected by Admin.`);
@@ -601,29 +605,29 @@ export function processWithdrawal(req, res) {
     }
 
     // Check user available balance
-    const userBalanceRow = db.prepare(`SELECT COALESCE(SUM(amount), 0) as balance FROM wallet_ledger WHERE user_id = ?`).get(request.user_id);
+    const userBalanceRow = await db.prepare(`SELECT COALESCE(SUM(amount), 0) as balance FROM wallet_ledger WHERE user_id = ?`).get(request.user_id);
     const userBalance = userBalanceRow.balance;
 
     if (userBalance < payoutAmount) {
       return res.status(400).json({ error: `Insufficient user balance (Available: ₹${userBalance.toLocaleString()}, Requested Payout: ₹${payoutAmount.toLocaleString()}).` });
     }
 
-    const payWithdrawal = db.transaction(() => {
+    const payWithdrawal = db.transaction(async () => {
       // Update withdrawal request
-      db.prepare(`
+      await db.prepare(`
         UPDATE withdrawal_requests
         SET status = 'PAID', amount_paid = ?, reference_id = ?, admin_note = ?, updated_at = CURRENT_TIMESTAMP, processed_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(payoutAmount, referenceId ? referenceId.trim() : null, adminNote || null, id);
 
       // Debit user wallet ledger
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO wallet_ledger (user_id, amount, type, reference_type, reference_id, description)
         VALUES (?, ?, 'WITHDRAWAL_DEBIT', 'WITHDRAWAL', ?, ?)
       `).run(request.user_id, -payoutAmount, id, `Withdrawal Paid to ${request.upi_string} (Ref: ${referenceId || 'N/A'})`);
 
       // Notify user
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO notifications (user_id, title, message, type)
         VALUES (?, ?, ?, 'SUCCESS')
       `).run(request.user_id, 'Withdrawal Processed & Paid!', `Your withdrawal payout of ₹${payoutAmount.toLocaleString()} has been paid to UPI ${request.upi_string}. Reference: ${referenceId || 'N/A'}`);
@@ -646,9 +650,9 @@ export function processWithdrawal(req, res) {
 }
 
 // --- BONUS & SYSTEM SETTINGS ---
-export function getSettings(req, res) {
+export async function getSettings(req, res) {
   try {
-    const settings = db.prepare('SELECT key, value, updated_at as updatedAt FROM system_settings').all();
+    const settings = await db.prepare('SELECT key, value, updated_at as updatedAt FROM system_settings').all();
     const settingsMap = {};
     settings.forEach(s => { settingsMap[s.key] = s.value; });
     return res.json({ settings: settingsMap });
@@ -658,7 +662,7 @@ export function getSettings(req, res) {
   }
 }
 
-export function updateSettings(req, res) {
+export async function updateSettings(req, res) {
   try {
     const {
       signupBonusPercent,
@@ -683,13 +687,13 @@ export function updateSettings(req, res) {
     if (autoBuyMaxAmount !== undefined) updates.push({ key: 'auto_buy_max_amount', value: String(autoBuyMaxAmount) });
     if (autoBuyIntervalSec !== undefined) updates.push({ key: 'auto_buy_interval_sec', value: String(autoBuyIntervalSec) });
 
-    const stmt = db.prepare(`
+    const stmt = await db.prepare(`
       INSERT INTO system_settings (key, value)
       VALUES (?, ?)
       ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP
     `);
 
-    db.transaction(() => {
+    db.transaction(async () => {
       for (const u of updates) {
         stmt.run(u.key, u.value);
       }
@@ -705,9 +709,9 @@ export function updateSettings(req, res) {
 }
 
 // --- AUDIT LOGS ---
-export function getAuditLogs(req, res) {
+export async function getAuditLogs(req, res) {
   try {
-    const logs = db.prepare(`
+    const logs = await db.prepare(`
       SELECT
         a.id, a.action, a.target, a.previous_value as previousValue,
         a.new_value as newValue, a.ip_address as ipAddress, a.created_at as createdAt,
@@ -726,37 +730,37 @@ export function getAuditLogs(req, res) {
 }
 
 // --- SYSTEM RESET ALL ---
-export function resetAllSystemData(req, res) {
+export async function resetAllSystemData(req, res) {
   try {
     db.pragma('foreign_keys = OFF');
-    db.transaction(() => {
+    db.transaction(async () => {
       // Clear all active and historical transactions & ledger entries
-      db.prepare('DELETE FROM referral_rewards').run();
-      db.prepare('DELETE FROM buy_transactions').run();
-      db.prepare('DELETE FROM withdrawal_requests').run();
-      db.prepare('DELETE FROM wallet_ledger').run();
-      db.prepare('DELETE FROM notifications').run();
-      db.prepare('DELETE FROM audit_logs').run();
+      await db.prepare('DELETE FROM referral_rewards').run();
+      await db.prepare('DELETE FROM buy_transactions').run();
+      await db.prepare('DELETE FROM withdrawal_requests').run();
+      await db.prepare('DELETE FROM wallet_ledger').run();
+      await db.prepare('DELETE FROM notifications').run();
+      await db.prepare('DELETE FROM audit_logs').run();
 
       // Reset payment accounts round-robin usage counters
-      db.prepare('UPDATE payment_accounts SET current_display_count = 0').run();
+      await db.prepare('UPDATE payment_accounts SET current_display_count = 0').run();
 
       // Clear auto-generated plans and re-seed base plans
-      db.prepare('DELETE FROM plans').run();
+      await db.prepare('DELETE FROM plans').run();
 
       // Seed standard default plans (e.g., ₹100, ₹200, ₹300, ₹500)
-      const insertPlan = db.prepare("INSERT INTO plans (amount, bonus_percentage, status) VALUES (?, ?, 'AVAILABLE')");
+      const insertPlan = await db.prepare("INSERT INTO plans (amount, bonus_percentage, status) VALUES (?, ?, 'AVAILABLE')");
       insertPlan.run(100, 3.0);
       insertPlan.run(200, 3.0);
       insertPlan.run(300, 3.0);
       insertPlan.run(500, 3.0);
 
       // Re-apply signup bonus for existing active users if configured
-      const signupBonusRow = db.prepare("SELECT value FROM system_settings WHERE key = 'signup_bonus_amount'").get();
+      const signupBonusRow = await db.prepare("SELECT value FROM system_settings WHERE key = 'signup_bonus_amount'").get();
       const bonusAmt = signupBonusRow ? parseFloat(signupBonusRow.value) : 100;
       if (bonusAmt > 0) {
-        const users = db.prepare("SELECT id FROM users WHERE status = 'ACTIVE'").all();
-        const insertLedger = db.prepare("INSERT INTO wallet_ledger (user_id, amount, type, reference_type, description) VALUES (?, ?, 'SIGNUP_BONUS', 'REGISTRATION', ?)");
+        const users = await db.prepare("SELECT id FROM users WHERE status = 'ACTIVE'").all();
+        const insertLedger = await db.prepare("INSERT INTO wallet_ledger (user_id, amount, type, reference_type, description) VALUES (?, ?, 'SIGNUP_BONUS', 'REGISTRATION', ?)");
         for (const u of users) {
           insertLedger.run(u.id, bonusAmt, `Welcome Registration Bonus (₹${bonusAmt})`);
         }
@@ -775,7 +779,7 @@ export function resetAllSystemData(req, res) {
 }
 
 // --- CREATE BATCH AUTO BUY ORDERS ---
-export function createBatchAutoBuyPlans(req, res) {
+export async function createBatchAutoBuyPlans(req, res) {
   try {
     const { minAmount, maxAmount, numberOfOrders, bonusPercentage } = req.body;
 
@@ -798,12 +802,12 @@ export function createBatchAutoBuyPlans(req, res) {
 
     const insertedPlans = [];
 
-    const insertStmt = db.prepare(`
+    const insertStmt = await db.prepare(`
       INSERT INTO plans (amount, bonus_percentage, status)
       VALUES (?, ?, 'AVAILABLE')
     `);
 
-    db.transaction(() => {
+    db.transaction(async () => {
       for (let i = 0; i < count; i++) {
         const randomStep = Math.floor(Math.random() * (maxStep - minStep + 1)) + minStep;
         const randomAmount = randomStep * step;

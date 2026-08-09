@@ -1,9 +1,9 @@
 import db from '../db.js';
 
-export function getUserUPIs(req, res) {
+export async function getUserUPIs(req, res) {
   try {
     const userId = req.user.id;
-    const upis = db.prepare(`
+    const upis = await db.prepare(`
       SELECT id, upi_id as upiId, status, created_at as createdAt
       FROM user_upi_accounts
       WHERE user_id = ?
@@ -17,7 +17,7 @@ export function getUserUPIs(req, res) {
   }
 }
 
-export function addUPI(req, res) {
+export async function addUPI(req, res) {
   try {
     const userId = req.user.id;
     const { upiId } = req.body;
@@ -32,12 +32,12 @@ export function addUPI(req, res) {
     }
 
     // Check duplicate for user
-    const existing = db.prepare('SELECT id FROM user_upi_accounts WHERE user_id = ? AND upi_id = ?').get(userId, cleanUPI);
+    const existing = await db.prepare('SELECT id FROM user_upi_accounts WHERE user_id = ? AND upi_id = ?').get(userId, cleanUPI);
     if (existing) {
       return res.status(400).json({ error: 'This UPI ID is already added to your profile.' });
     }
 
-    const result = db.prepare(`
+    const result = await db.prepare(`
       INSERT INTO user_upi_accounts (user_id, upi_id, status)
       VALUES (?, ?, 'ACTIVE')
     `).run(userId, cleanUPI);
@@ -56,7 +56,7 @@ export function addUPI(req, res) {
   }
 }
 
-export function editUPI(req, res) {
+export async function editUPI(req, res) {
   try {
     const userId = req.user.id;
     const { id } = req.params;
@@ -67,13 +67,13 @@ export function editUPI(req, res) {
     }
 
     const cleanUPI = upiId.trim();
-    const upiRecord = db.prepare('SELECT * FROM user_upi_accounts WHERE id = ? AND user_id = ?').get(id, userId);
+    const upiRecord = await db.prepare('SELECT * FROM user_upi_accounts WHERE id = ? AND user_id = ?').get(id, userId);
 
     if (!upiRecord) {
       return res.status(404).json({ error: 'UPI account record not found.' });
     }
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE user_upi_accounts
       SET upi_id = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND user_id = ?
@@ -86,17 +86,17 @@ export function editUPI(req, res) {
   }
 }
 
-export function deleteUPI(req, res) {
+export async function deleteUPI(req, res) {
   try {
     const userId = req.user.id;
     const { id } = req.params;
 
-    const upiRecord = db.prepare('SELECT * FROM user_upi_accounts WHERE id = ? AND user_id = ?').get(id, userId);
+    const upiRecord = await db.prepare('SELECT * FROM user_upi_accounts WHERE id = ? AND user_id = ?').get(id, userId);
     if (!upiRecord) {
       return res.status(404).json({ error: 'UPI record not found.' });
     }
 
-    db.prepare('DELETE FROM user_upi_accounts WHERE id = ? AND user_id = ?').run(id, userId);
+    await db.prepare('DELETE FROM user_upi_accounts WHERE id = ? AND user_id = ?').run(id, userId);
     return res.json({ message: 'UPI ID removed successfully.' });
   } catch (err) {
     console.error('Delete UPI error:', err);
@@ -104,10 +104,10 @@ export function deleteUPI(req, res) {
   }
 }
 
-export function getBankProfile(req, res) {
+export async function getBankProfile(req, res) {
   try {
     const userId = req.user.id;
-    const user = db.prepare(`
+    const user = await db.prepare(`
       SELECT bank_holder_name as bankHolderName, bank_account_number as bankAccountNumber, bank_ifsc as bankIfsc, bank_name as bankName, bank_upi_id as bankUpiId
       FROM users WHERE id = ?
     `).get(userId);
@@ -131,7 +131,7 @@ export function getBankProfile(req, res) {
   }
 }
 
-export function saveBankProfile(req, res) {
+export async function saveBankProfile(req, res) {
   try {
     const userId = req.user.id;
     const { bankHolderName, bankAccountNumber, bankIfsc, bankName, bankUpiId } = req.body;
@@ -158,16 +158,16 @@ export function saveBankProfile(req, res) {
     const cleanBankName = bankName.trim();
     const cleanUpi = bankUpiId.trim();
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE users
       SET bank_holder_name = ?, bank_account_number = ?, bank_ifsc = ?, bank_name = ?, bank_upi_id = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(cleanHolder, cleanAccNo, cleanIfsc, cleanBankName, cleanUpi, userId);
 
     // Sync into user_upi_accounts table so user can select it
-    const existingUpi = db.prepare('SELECT id FROM user_upi_accounts WHERE user_id = ? AND upi_id = ?').get(userId, cleanUpi);
+    const existingUpi = await db.prepare('SELECT id FROM user_upi_accounts WHERE user_id = ? AND upi_id = ?').get(userId, cleanUpi);
     if (!existingUpi) {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO user_upi_accounts (user_id, upi_id, status)
         VALUES (?, ?, 'ACTIVE')
       `).run(userId, cleanUpi);
@@ -183,13 +183,13 @@ export function saveBankProfile(req, res) {
   }
 }
 
-export function requestWithdrawal(req, res) {
+export async function requestWithdrawal(req, res) {
   try {
     const userId = req.user.id;
     const { userUpiId } = req.body;
 
     // 1. Check Bank Profile Eligibility
-    const userBank = db.prepare(`
+    const userBank = await db.prepare(`
       SELECT bank_holder_name, bank_account_number, bank_ifsc, bank_name, bank_upi_id
       FROM users WHERE id = ?
     `).get(userId);
@@ -213,7 +213,7 @@ export function requestWithdrawal(req, res) {
       return res.status(400).json({ error: 'Please select an active UPI ID for withdrawal.' });
     }
 
-    const upiRecord = db.prepare('SELECT * FROM user_upi_accounts WHERE id = ? AND user_id = ?').get(userUpiId, userId);
+    const upiRecord = await db.prepare('SELECT * FROM user_upi_accounts WHERE id = ? AND user_id = ?').get(userUpiId, userId);
     if (!upiRecord) {
       return res.status(404).json({ error: 'Selected UPI ID not found.' });
     }
@@ -223,7 +223,7 @@ export function requestWithdrawal(req, res) {
     }
 
     // Check existing pending withdrawal
-    const pendingReq = db.prepare(`
+    const pendingReq = await db.prepare(`
       SELECT id FROM withdrawal_requests
       WHERE user_id = ? AND status IN ('REQUESTED', 'PROCESSING')
     `).get(userId);
@@ -236,13 +236,13 @@ export function requestWithdrawal(req, res) {
 
     const withdrawId = `WITH-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO withdrawal_requests (
         id, user_id, user_upi_id, upi_string, status
       ) VALUES (?, ?, ?, ?, 'REQUESTED')
     `).run(withdrawId, userId, upiRecord.id, upiRecord.upi_id);
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO notifications (user_id, title, message, type)
       VALUES (?, ?, ?, 'INFO')
     `).run(
