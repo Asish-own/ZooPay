@@ -22,19 +22,18 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// Initialize DB & Seed Data
-initDatabase();
-seedDatabase().then(() => {
-  startAutoPlanEngine();
-}).catch(err => console.error('Seed error:', err));
-
-// API Routes
+// API Routes (Mount on both /api/* and /* for Vercel Serverless rewrites)
 app.use('/api/auth', authRoutes);
+app.use('/auth', authRoutes);
+
 app.use('/api/user', userRoutes);
+app.use('/user', userRoutes);
+
 app.use('/api/admin', adminRoutes);
+app.use('/admin', adminRoutes);
 
 // Health Check
-app.get('/api/health', (req, res) => {
+app.get(['/api/health', '/health'], (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString(), app: 'ZooPay Buy/Sell Platform' });
 });
 

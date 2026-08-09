@@ -16,10 +16,12 @@ let sqliteDb = null;
 
 if (supabaseUrl && supabaseUrl.trim() !== '') {
   isPg = true;
-  console.log('Connecting to Supabase PostgreSQL Database...');
   pool = new pg.Pool({
     connectionString: supabaseUrl,
-    ssl: { rejectUnauthorized: false }
+    ssl: { rejectUnauthorized: false },
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000
   });
 } else {
   console.log('Using local SQLite Database (zoopay.db)...');
