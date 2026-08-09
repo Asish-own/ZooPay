@@ -33,7 +33,17 @@ if (supabaseUrl && supabaseUrl.trim() !== '') {
 function convertSql(sql) {
   if (!isPg) return sql;
   let index = 1;
-  return sql.replace(/\?/g, () => `$${index++}`);
+  let pgSql = sql.replace(/\?/g, () => `$${index++}`);
+
+  // Replace SQLite ON CONFLICT DO UPDATE SET value=excluded.value with Postgres EXCLUDED.value
+  pgSql = pgSql.replace(/excluded\.value/gi, 'EXCLUDED.value');
+
+  // Automatically append RETURNING * for PostgreSQL INSERT queries
+  if (/^\s*INSERT\s+/i.test(pgSql) && !/RETURNING/i.test(pgSql)) {
+    pgSql += ' RETURNING *';
+  }
+
+  return pgSql;
 }
 
 const db = {
@@ -57,7 +67,8 @@ const db = {
       async run(...params) {
         const flat = params.length === 1 && Array.isArray(params[0]) ? params[0] : params;
         const res = await pool.query(pgSql, flat);
-        const lastId = res.rows && res.rows[0] ? (res.rows[0].id || res.rows[0].key) : null;
+        const firstRow = res.rows && res.rows[0] ? res.rows[0] : null;
+        const lastId = firstRow ? (firstRow.id || firstRow.key) : null;
         return {
           lastInsertRowid: lastId,
           changes: res.rowCount
