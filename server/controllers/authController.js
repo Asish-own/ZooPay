@@ -36,13 +36,13 @@ export async function register(req, res) {
     }
 
     // Check unique mobile
-    const existingMobile = db.prepare('SELECT id FROM users WHERE mobile = ?').get(cleanMobile);
+    const existingMobile = await db.prepare('SELECT id FROM users WHERE mobile = ?').get(cleanMobile);
     if (existingMobile) {
       return res.status(400).json({ error: 'Mobile number already registered.' });
     }
 
     // Check unique username
-    const existingUsername = db.prepare('SELECT id FROM users WHERE username = ?').get(cleanUsername);
+    const existingUsername = await db.prepare('SELECT id FROM users WHERE username = ?').get(cleanUsername);
     if (existingUsername) {
       return res.status(400).json({ error: 'Username already taken.' });
     }
@@ -50,7 +50,7 @@ export async function register(req, res) {
     // Check referral code if provided
     let referrerId = null;
     if (referralCode && referralCode.trim() !== '') {
-      const referrer = db.prepare('SELECT id FROM users WHERE referral_code = ?').get(referralCode.trim().toUpperCase());
+      const referrer = await db.prepare('SELECT id FROM users WHERE referral_code = ?').get(referralCode.trim().toUpperCase());
       if (!referrer) {
         return res.status(400).json({ error: 'Invalid referral code.' });
       }
@@ -62,13 +62,13 @@ export async function register(req, res) {
 
     // Generate unique referral code for this new user
     let userReferralCode = generateReferralCode();
-    while (db.prepare('SELECT id FROM users WHERE referral_code = ?').get(userReferralCode)) {
+    while (await db.prepare('SELECT id FROM users WHERE referral_code = ?').get(userReferralCode)) {
       userReferralCode = generateReferralCode();
     }
 
     // Execute in transaction
-    const insertUser = db.transaction(() => {
-      const result = db.prepare(`
+    const insertUser = db.transaction(async () => {
+      const result = await db.prepare(`
         INSERT INTO users (mobile, username, password_hash, referral_code, referred_by_id)
         VALUES (?, ?, ?, ?, ?)
       `).run(cleanMobile, cleanUsername, passwordHash, userReferralCode, referrerId);
@@ -76,12 +76,12 @@ export async function register(req, res) {
       const userId = result.lastInsertRowid;
 
       // Check signup bonus amount setting (e.g. ₹100)
-      const signupBonusAmountRow = db.prepare(`SELECT value FROM system_settings WHERE key = 'signup_bonus_amount'`).get();
+      const signupBonusAmountRow = await db.prepare(`SELECT value FROM system_settings WHERE key = 'signup_bonus_amount'`).get();
       let bonusAmount = signupBonusAmountRow ? parseFloat(signupBonusAmountRow.value) : 0;
 
       if (isNaN(bonusAmount) || bonusAmount <= 0) {
         // Fallback to percentage calculation if amount not set
-        const signupBonusPctRow = db.prepare(`SELECT value FROM system_settings WHERE key = 'signup_bonus_percent'`).get();
+        const signupBonusPctRow = await db.prepare(`SELECT value FROM system_settings WHERE key = 'signup_bonus_percent'`).get();
         const bonusPct = signupBonusPctRow ? parseFloat(signupBonusPctRow.value) : 0;
         if (bonusPct > 0) {
           bonusAmount = (100 * bonusPct) / 100;
@@ -89,14 +89,14 @@ export async function register(req, res) {
       }
 
       if (bonusAmount > 0) {
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO wallet_ledger (user_id, amount, type, reference_type, description)
           VALUES (?, ?, 'SIGNUP_BONUS', 'REGISTRATION', ?)
         `).run(userId, bonusAmount, `Welcome Registration Bonus (₹${bonusAmount.toLocaleString()})`);
       }
 
       // Add welcome notification
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO notifications (user_id, title, message, type)
         VALUES (?, ?, ?, ?)
       `).run(userId, 'Welcome to ZooPay!', 'Your account has been created successfully. Explore available buy plans to start earning bonuses.', 'SUCCESS');
@@ -104,7 +104,7 @@ export async function register(req, res) {
       return userId;
     });
 
-    const newUserId = insertUser();
+    const newUserId = await insertUser();
 
     return res.status(201).json({
       message: 'Registration successful! Please log in.',
@@ -124,7 +124,7 @@ export async function login(req, res) {
       return res.status(400).json({ error: 'Please enter your mobile number and password.' });
     }
 
-    const user = db.prepare('SELECT * FROM users WHERE mobile = ?').get(mobile.trim());
+    const user = await db.prepare('SELECT * FROM users WHERE mobile = ?').get(mobile.trim());
     if (!user) {
       return res.status(401).json({ error: 'Invalid mobile number or password.' });
     }
@@ -165,7 +165,7 @@ export async function adminLogin(req, res) {
       return res.status(400).json({ error: 'Please enter admin username and password.' });
     }
 
-    const admin = db.prepare('SELECT * FROM admin_users WHERE username = ?').get(username.trim());
+    const admin = await db.prepare('SELECT * FROM admin_users WHERE username = ?').get(username.trim());
     if (!admin) {
       return res.status(401).json({ error: 'Invalid admin credentials.' });
     }
