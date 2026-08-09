@@ -8,7 +8,7 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const supabaseUrl = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL;
+const supabaseUrl = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
 
 let isPg = false;
 let pool = null;
@@ -17,12 +17,15 @@ let sqliteDb = null;
 if (supabaseUrl && supabaseUrl.trim() !== '') {
   isPg = true;
   pool = new pg.Pool({
-    connectionString: supabaseUrl,
+    connectionString: supabaseUrl.trim(),
     ssl: { rejectUnauthorized: false },
     max: 10,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000
   });
+} else if (process.env.VERCEL) {
+  isPg = true;
+  console.error('CRITICAL WARNING: SUPABASE_DB_URL environment variable is not defined in Vercel settings!');
 } else {
   console.log('Using local SQLite Database (zoopay.db)...');
   const Database = (await import('better-sqlite3')).default;

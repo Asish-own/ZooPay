@@ -52,6 +52,12 @@ app.get('*', (req, res, next) => {
   });
 });
 
+// Global Error Handler for Express
+app.use((err, req, res, next) => {
+  console.error('ZooPay Express Error Handler:', err);
+  res.status(500).json({ error: err.message || 'Internal server error on ZooPay platform.' });
+});
+
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`ZooPay Server listening on http://localhost:${PORT}`);
