@@ -82,7 +82,12 @@ export async function getAllUsers(req, res) {
     query += ` ORDER BY u.id DESC`;
 
     const users = await db.prepare(query).all(...params);
-    return res.json({ users });
+    const mappedUsers = users.map(u => ({
+      ...u,
+      balance: parseFloat(u.balance || 0)
+    }));
+
+    return res.json({ users: mappedUsers });
   } catch (err) {
     console.error('Get users error:', err);
     return res.status(500).json({ error: 'Failed to fetch users.' });
@@ -154,7 +159,14 @@ export async function getAdminPlans(req, res) {
       ORDER BY p.amount ASC
     `).all();
 
-    return res.json({ plans });
+    const mappedPlans = plans.map(p => ({
+      ...p,
+      amount: parseFloat(p.amount || 0),
+      bonusPercentage: parseFloat(p.bonusPercentage || 0),
+      activeBuyersCount: parseInt(p.activeBuyersCount || 0)
+    }));
+
+    return res.json({ plans: mappedPlans });
   } catch (err) {
     console.error('Get admin plans error:', err);
     return res.status(500).json({ error: 'Failed to fetch buy plans.' });
@@ -417,7 +429,15 @@ export async function getPendingBuyVerifications(req, res) {
       ORDER BY b.created_at DESC
     `).all();
 
-    return res.json({ buyVerifications: pendingTxns });
+    const mappedTxns = pendingTxns.map(t => ({
+      ...t,
+      planAmount: parseFloat(t.planAmount || 0),
+      bonusPercentage: parseFloat(t.bonusPercentage || 0),
+      bonusAmount: parseFloat(t.bonusAmount || 0),
+      totalAmount: parseFloat(t.totalAmount || 0)
+    }));
+
+    return res.json({ buyVerifications: mappedTxns });
   } catch (err) {
     console.error('Get buy verifications error:', err);
     return res.status(500).json({ error: 'Failed to fetch purchase verifications.' });
@@ -449,30 +469,33 @@ export async function approveBuyVerification(req, res) {
         WHERE id = ?
       `).run(adminNote || 'Payment Verified & Approved by Admin', id);
 
+      const planAmount = parseFloat(tx.plan_amount);
+      const bonusAmount = parseFloat(tx.bonus_amount);
+
       // 2. Credit buyer in wallet_ledger: BUY_CREDIT and BUY_BONUS
       await db.prepare(`
         INSERT INTO wallet_ledger (user_id, amount, type, reference_type, reference_id, description)
         VALUES (?, ?, 'BUY_CREDIT', 'BUY_TRANSACTION', ?, ?)
-      `).run(tx.user_id, tx.plan_amount, id, `Deposit Plan Purchase (Tx: ${id})`);
+      `).run(tx.user_id, planAmount, id, `Deposit Plan Purchase (Tx: ${id})`);
 
       await db.prepare(`
         INSERT INTO wallet_ledger (user_id, amount, type, reference_type, reference_id, description)
         VALUES (?, ?, 'BUY_BONUS', 'BUY_TRANSACTION', ?, ?)
-      `).run(tx.user_id, tx.bonus_amount, id, `Buy Plan Bonus (${tx.bonus_percentage}%)`);
+      `).run(tx.user_id, bonusAmount, id, `Buy Plan Bonus (${tx.bonus_percentage}%)`);
 
       // 3. Referral reward processing if buyer was referred
       if (buyer && buyer.referred_by_id) {
         const refBonusSetting = await db.prepare(`SELECT value FROM system_settings WHERE key = 'referral_bonus_percent'`).get();
         const refPct = refBonusSetting ? parseFloat(refBonusSetting.value) : 0.05;
 
-        const refRewardAmount = (tx.plan_amount * refPct) / 100;
+        const refRewardAmount = (planAmount * refPct) / 100;
 
         if (refRewardAmount > 0) {
           // Insert into referral_rewards
           await db.prepare(`
             INSERT INTO referral_rewards (referrer_id, referred_user_id, buy_transaction_id, transaction_amount, reward_percentage, reward_amount)
             VALUES (?, ?, ?, ?, ?, ?)
-          `).run(buyer.referred_by_id, buyer.id, id, tx.plan_amount, refPct, refRewardAmount);
+          `).run(buyer.referred_by_id, buyer.id, id, planAmount, refPct, refRewardAmount);
 
           // Credit referrer ledger
           await db.prepare(`
@@ -560,7 +583,13 @@ export async function getAdminWithdrawals(req, res) {
       ORDER BY w.created_at DESC
     `).all();
 
-    return res.json({ withdrawalRequests: requests });
+    const mappedRequests = requests.map(r => ({
+      ...r,
+      userAvailableBalance: parseFloat(r.userAvailableBalance || 0),
+      amountPaid: r.amountPaid ? parseFloat(r.amountPaid) : null
+    }));
+
+    return res.json({ withdrawalRequests: mappedRequests });
   } catch (err) {
     console.error('Get admin withdrawals error:', err);
     return res.status(500).json({ error: 'Failed to fetch withdrawal requests.' });
@@ -606,7 +635,7 @@ export async function processWithdrawal(req, res) {
 
     // Check user available balance
     const userBalanceRow = await db.prepare(`SELECT COALESCE(SUM(amount), 0) as balance FROM wallet_ledger WHERE user_id = ?`).get(request.user_id);
-    const userBalance = userBalanceRow.balance;
+    const userBalance = parseFloat(userBalanceRow?.balance || 0);
 
     if (userBalance < payoutAmount) {
       return res.status(400).json({ error: `Insufficient user balance (Available: ₹${userBalance.toLocaleString()}, Requested Payout: ₹${payoutAmount.toLocaleString()}).` });

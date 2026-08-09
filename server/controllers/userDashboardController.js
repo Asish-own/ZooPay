@@ -57,12 +57,12 @@ export async function getDashboardSummary(req, res) {
 
     return res.json({
       summary: {
-        availableBalance: balanceRow.balance,
-        totalBuyAmount: buyRow.total,
-        totalBonusReceived: bonusRow.total,
-        totalReferralReward: refRow.total,
-        totalSellPaid: sellRow.total,
-        pendingWithdrawalCount: pendingWithdrawRow.pending_count
+        availableBalance: parseFloat(balanceRow?.balance || 0),
+        totalBuyAmount: parseFloat(buyRow?.total || 0),
+        totalBonusReceived: parseFloat(bonusRow?.total || 0),
+        totalReferralReward: parseFloat(refRow?.total || 0),
+        totalSellPaid: parseFloat(sellRow?.total || 0),
+        pendingWithdrawalCount: parseInt(pendingWithdrawRow?.pending_count || 0)
       },
       notifications
     });

@@ -28,13 +28,14 @@ export async function getAvailablePlans(req, res) {
     const plansWithState = allPlans.map(plan => {
       const isLocked = lockedPlanIds.has(plan.id);
       const activeTx = userActiveTxns.find(t => t.plan_id === plan.id);
-      const bonusPct = plan.bonus_percentage;
-      const bonusAmt = (plan.amount * bonusPct) / 100;
-      const totalAmt = plan.amount + bonusAmt;
+      const amount = parseFloat(plan.amount);
+      const bonusPct = parseFloat(plan.bonus_percentage);
+      const bonusAmt = (amount * bonusPct) / 100;
+      const totalAmt = amount + bonusAmt;
 
       return {
         id: plan.id,
-        amount: plan.amount,
+        amount: amount,
         bonusPercentage: bonusPct,
         bonusAmount: bonusAmt,
         totalAmount: totalAmt,
@@ -93,10 +94,11 @@ export async function initiateBuy(req, res) {
 
     // Check global buy bonus setting if set, else fallback to plan bonus
     const buyBonusSetting = await db.prepare(`SELECT value FROM system_settings WHERE key = 'buy_bonus_percent'`).get();
-    const bonusPct = buyBonusSetting && buyBonusSetting.value ? parseFloat(buyBonusSetting.value) : plan.bonus_percentage;
+    const planAmount = parseFloat(plan.amount);
+    const bonusPct = buyBonusSetting && buyBonusSetting.value ? parseFloat(buyBonusSetting.value) : parseFloat(plan.bonus_percentage);
 
-    const bonusAmount = (plan.amount * bonusPct) / 100;
-    const totalAmount = plan.amount + bonusAmount;
+    const bonusAmount = (planAmount * bonusPct) / 100;
+    const totalAmount = planAmount + bonusAmount;
 
     // --- ROUND-ROBIN PAYMENT ACCOUNT SELECTION ---
     const selectAccountTx = db.transaction(async () => {
@@ -135,7 +137,7 @@ export async function initiateBuy(req, res) {
       return selectedAccount;
     });
 
-    const paymentAccount = selectAccountTx();
+    const paymentAccount = await selectAccountTx();
 
     if (!paymentAccount) {
       return res.status(400).json({ error: 'No payment account is currently available. Please try again later.' });
