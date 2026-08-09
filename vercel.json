@@ -1,28 +1,16 @@
 {
-  "version": 2,
-  "builds": [
+  "rewrites": [
     {
-      "src": "server/index.js",
-      "use": "@vercel/node"
+      "source": "/api/(.*)",
+      "destination": "/api/index.js"
     },
     {
-      "src": "package.json",
-      "use": "@vercel/static-build",
-      "config": { "distDir": "dist" }
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "server/index.js"
+      "source": "/zoopayadmin2026",
+      "destination": "/index.html"
     },
     {
-      "src": "/zoopayadmin2026",
-      "dest": "/index.html"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/$1"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
